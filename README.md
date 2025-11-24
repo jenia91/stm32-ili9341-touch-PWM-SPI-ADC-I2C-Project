@@ -1,119 +1,159 @@
-STM32 Smart Irrigation GUI – HAL, ILI9341, XPT2046
+Smart Irrigation GUI (STM32F4 + ILI9341 + Touch)
 
 Small STM32F4 project that ports the core parts of my smart irrigation system into a clean STM32CubeIDE workspace.
 
-This repository focuses on working drivers (SPI TFT + touch, software I2C, ADC, PWM, relay) and a simple GUI that can be reused as a template for future embedded projects.
+The focus here is a working GUI, SPI TFT + touch, software I2C, ADC, relay and servo PWM that can be reused as a template for future embedded projects.
 
 Overview
 
 The firmware runs on an STM32F4 microcontroller and provides:
 
-SPI TFT display with a simple GUI (3 screens)
+SPI TFT display with a simple touch GUI (3 screens)
 
-Resistive touch controller (XPT2046)
+Software I2C for DS1307 real-time clock and LM75 temperature sensor
 
-Real-time clock (DS1307) over software I2C
+ADC input for a light sensor
 
-Temperature sensor (LM75) over software I2C
+PWM output for a servo motor
 
-Light sensor on ADC1
+Digital output for a relay module
 
-Relay output for load control
+Debug LED for quick visual feedback while reading sensors
 
-Servo output with 50 Hz PWM
+All code is written in C using STM32 HAL and tested directly on hardware.
 
-Soil and rain sensors are not connected in this STM32 version, so they are not shown in the UI.
+GUI and Screens
 
-Features
+The UI is divided into three screens:
 
-Three main screens:
+Startup
 
-Startup – project title and navigation buttons
+Project title
 
-Check – read time, temperature, light and test the relay + servo
+Three navigation buttons: Check, Setup, Project
 
-Project – periodic screen that shows live time, temperature, light and placeholder text for future logic
+Check
 
-Software I2C on PB6 / PB7 for:
+Buttons to read:
 
-DS1307 real-time clock
+Time from DS1307
 
-LM75 temperature sensor
+Temperature from LM75
 
-SPI1 for:
+Light percentage from ADC
 
-ILI9341 TFT display
+Relay test button:
 
-XPT2046 touch controller (shares SPI bus)
+Toggles a relay output
 
-PWM servo control:
+When the relay is ON, the servo starts sweeping between 0 and 180 degrees
 
-TIM4 CH3 on PB8
+Setup
 
-50 Hz, 600–2400 µs pulse mapped to 0–180 degrees
+Simple configuration screen with three rows:
 
-Relay output:
+Hour
 
-PB12 drives an external relay module (active high)
+Minute
 
-Light sensor:
+Temperature threshold
 
-ADC1, channel on PC0 (IN10), scaled to 0–100 % for the GUI
+Each row has a numeric value box and a “+” button
 
-Debug LED on PB13 (toggles during I2C and periodic updates)
+Long press on a button repeats the increment
 
-All code is written in C using STM32 HAL and tested on real hardware.
+Project
 
-Hardware
+Periodic refresh once per second
 
-STM32F4 development board (CubeIDE project, HSI → PLL 168 MHz)
+Shows:
 
-ILI9341 320x240 TFT over SPI1
+Current time (RTC or user-set software time)
 
-XPT2046 resistive touch controller (shared SPI1)
+Temperature and threshold
 
-DS1307 RTC (I2C)
+Light percentage
+
+Placeholder line for future irrigation logic
+
+Peripherals and Interfaces
+Communication Interfaces
+Interface	Purpose	Implementation
+SPI1	TFT display + touch controller	HAL SPI (blocking)
+I2C (SW)	DS1307 RTC, LM75 temperature	Bit-banged on PB6/PB7
+ADC1	Light sensor	Single channel on PC0
+PWM	Servo control	TIM4 CH3 on PB8
+GPIO	Relay and debug LED	PB12, PB13 outputs
+Hardware Summary
+
+STM32F4 development board (HSI to PLL at 168 MHz)
+
+ILI9341 320x240 TFT display over SPI1
+
+XPT2046 resistive touch controller (shares SPI1)
+
+DS1307 real-time clock (I2C)
 
 LM75 temperature sensor (I2C)
 
-Light sensor connected to ADC1 on PC0
+Light sensor connected to ADC1 on PC0 (IN10)
 
-Servo (for example MG90S) on PB8 (TIM4_CH3)
+Servo motor (for example MG90S) on PB8 driven by 50 Hz PWM
 
 Relay module on PB12
 
-Common 3.3 V / 5 V supply with shared GND between MCU, sensors and servo/relay
+Common power supply and shared GND between MCU, sensors, servo and relay
 
 Pin Map (core signals)
 Function	MCU pin	Notes
-TFT + touch SPI	SPI1 (PA5/6/7)	SCK / MISO / MOSI, CS pins in gpio.c
-I2C SCL	PB6	Software I2C bit-bang
-I2C SDA	PB7	Software I2C bit-bang
-Light sensor (ADC)	PC0	ADC1 IN10
-Servo PWM	PB8	TIM4 CH3, 50 Hz PWM
-Relay control	PB12	Push-pull output to relay IN
-Debug LED	PB13	Indicates I2C/sensor activity
-Power, ground	VCC, GND	All modules share the same ground
+TFT SCK / MISO / MOSI	PA5 / PA6 / PA7	SPI1 bus shared with XPT2046
+TFT / Touch CS	See gpio.c	Chip-select pins configured in CubeMX / gpio.c
+I2C SCL (SW)	PB6	Software I2C bit-bang
+I2C SDA (SW)	PB7	Software I2C bit-bang
+Light sensor	PC0	ADC1 IN10, scaled to 0–100%
+Servo PWM	PB8	TIM4 CH3, 50 Hz, 600–2400 µs pulse width
+Relay control	PB12	Push-pull output to relay module input (active high)
+Debug LED	PB13	Toggles during I2C / periodic refresh
+Power / GND	VCC, GND	All modules share the same ground
 
-For exact SPI chip-select and reset pins, see Core/Src/gpio.c and the CubeMX .ioc file.
+For exact chip-select and reset pins of the display and touch controller, see Core/Src/gpio.c and the CubeMX .ioc file.
+
+Timing and PWM
+
+System clock is configured from HSI through PLL to 168 MHz.
+
+TIM4 is configured with:
+
+1 µs tick (Prescaler = 83)
+
+Period = 19999 for a 20 ms frame (50 Hz PWM)
+
+Servo mapping:
+
+0 degrees → 600 µs
+
+180 degrees → 2400 µs
+The code linearly maps 0–180 degrees to this pulse width range and writes it into TIM4 CH3 compare register.
 
 Build and Flash
 
 Toolchain: STM32CubeIDE
 
-Open the .ioc file in STM32CubeIDE and let it generate the project if needed.
+Steps:
 
-Build the project in Release or Debug configuration.
+Clone this repository.
 
-Flash the firmware using ST-LINK directly from CubeIDE.
+Open the project in STM32CubeIDE using the existing .ioc file.
 
-Clock and timers:
+Build the project in Debug or Release configuration.
 
-System clock configured from HSI through PLL to 168 MHz.
+Flash the firmware to the board using ST-LINK.
 
-TIM4 configured with 1 µs tick and period 19999 for 50 Hz PWM on PB8.
+Open a serial terminal or use the on-board debug LED to observe activity.
 
-Repository structure
+No RTOS is used, the main loop is fully event-driven with HAL and small delays to limit CPU usage.
+
+Repository Structure
 Core/
   Inc/
     main.h
@@ -122,17 +162,16 @@ Core/
     i2c_sw.h
     ...
   Src/
-    main.c           // GUI, touch handling, sensor refresh, servo logic
+    main.c           // GUI, touch handling, sensors, relay and servo logic
     rtc_ds1307.c     // DS1307 driver over software I2C
     sensors_lm75.c   // LM75 temperature driver
-    i2c_sw.c         // Bit-banged I2C on PB6/PB7
-    ...
+    i2c_sw.c         // Bit-banged I2C implementation
+    spi.c, adc.c, tim.c, gpio.c
 Drivers/
   STM32F4xx_HAL_Driver/
   CMSIS/
 Middlewares/
   ...
-stm32_project.ioc    // STM32CubeMX configuration file
-.project, .cproject  // STM32CubeIDE metadata
+stm32_project.ioc    // STM32CubeMX configuration
 .gitignore
 README.md
