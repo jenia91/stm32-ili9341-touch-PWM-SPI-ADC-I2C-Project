@@ -164,11 +164,8 @@ GPIO, SPI, ADC, TIM init → Core/Src/gpio.c, Core/Src/spi.c, Core/Src/adc.c, Co
 Public headers → Core/Inc/
 
 CubeMX configuration → Ivgeni_Goriatchev_STM32_Project.ioc
-
-Repository Structure
-Repo map
-text
-Copy code
+## Repo map
+```
 Core/
  ├─ Inc/
  │   ├─ main.h             # Global defines, prototypes
@@ -194,4 +191,4 @@ Drivers/
 Ivgeni_Goriatchev_STM32_Project.ioc  # STM32CubeMX configuration
 .gitignore
 LICENSE
-README.md
+```
