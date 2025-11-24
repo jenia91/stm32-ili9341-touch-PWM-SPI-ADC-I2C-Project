@@ -1,177 +1,197 @@
-Smart Irrigation GUI (STM32F4 + ILI9341 + Touch)
+# Smart Irrigation GUI – STM32F4 (ILI9341 + Touch)
 
-Small STM32F4 project that ports the core parts of my smart irrigation system into a clean STM32CubeIDE workspace.
+<!-- Optional: add a project photo/screenshot and update the src URL -->
+<!--
+<img width="900" alt="STM32F4 GUI Prototype"
+     src="https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+-->
 
-The focus here is a working GUI, SPI TFT + touch, software I2C, ADC, relay and servo PWM that can be reused as a template for future embedded projects.
+---
 
-Overview
+## Overview
 
-The firmware runs on an STM32F4 microcontroller and provides:
+STM32CubeIDE project that ports the core parts of my smart irrigation system  
+into a clean **STM32F4** workspace.
 
-SPI TFT display with a simple touch GUI (3 screens)
+The firmware runs on an STM32F4 and provides:
 
-Software I2C for DS1307 real-time clock and LM75 temperature sensor
+- **SPI TFT GUI** with 3 screens (Startup / Check / Project)
+- **Touch input** via XPT2046 over the same SPI bus
+- **Software I²C** on PB6/PB7 for:
+  - DS1307 real-time clock (RTC)
+  - LM75 temperature sensor
+- **ADC1** input (PC0) for light sensor
+- **PWM** on TIM4 CH3 (PB8) to drive a servo (0–180° sweep)
+- **Relay output** on PB12
+- **Debug LED** on PB13 to show I²C/sensor activity
 
-ADC input for a light sensor
+All code is written in C using **STM32 HAL** and tested directly on hardware  
+(ILI9341 TFT + XPT2046 touch + DS1307 + LM75 + light sensor + relay + servo).
 
-PWM output for a servo motor
+---
 
-Digital output for a relay module
+## Features
 
-Debug LED for quick visual feedback while reading sensors
+- **Three-screen GUI (landscape 320×240)**  
+  - **Startup** – project title + 3 navigation buttons  
+  - **Check** – read Time / Temp / Light, plus Relay test button  
+  - **Project** – periodic 1 Hz update with:
+    - Current time (RTC or software time if user set it)
+    - Temperature and threshold
+    - Light percentage
+    - Placeholder line for future irrigation logic
 
-All code is written in C using STM32 HAL and tested directly on hardware.
+- **Touch-friendly Setup screen**
+  - Rows for **Hour**, **Minute**, **Temperature threshold**
+  - Numeric value boxes + `"+"` button per row
+  - **Long press = auto-repeat** for faster changes
+  - Option to switch between **RTC time** and **software time**
 
-GUI and Screens
+- **Relay + Servo test logic**
+  - Tapping **Relay** button toggles PB12 (active-high relay module)
+  - When relay is ON:
+    - Servo on PB8 sweeps continuously **0 ↔ 180°**
+    - Non-blocking sweep in the main loop (no delay inside PWM)
 
-The UI is divided into three screens:
+- **Sensor refresh indicators**
+  - PB13 debug LED turns ON while reading RTC/LM75/light
+  - Provides quick visual feedback during sensor I/O
 
-Startup
+---
 
-Project title
+## Peripherals & Communication
 
-Three navigation buttons: Check, Setup, Project
+### Communication interfaces
 
-Check
+| Interface | Purpose                           | Implementation                  |
+|----------|------------------------------------|---------------------------------|
+| **SPI1** | ILI9341 TFT + XPT2046 touch       | HAL SPI (blocking transfers)   |
+| **I²C (SW)** | DS1307 RTC, LM75 temperature | Bit-banged on PB6/PB7 (`i2c_sw`) |
+| **ADC1** | Light sensor on PC0 (IN10)        | Single-channel polling         |
+| **PWM**  | Servo control on PB8              | TIM4 CH3, 50 Hz, 1 µs tick     |
+| **GPIO** | Relay + debug LED                 | PB12, PB13 push-pull outputs   |
 
-Buttons to read:
+### Hardware summary
 
-Time from DS1307
+- **MCU**: STM32F405 (HSI → PLL at 168 MHz)
+- **Display**: ILI9341 320×240 TFT over SPI1
+- **Touch**: XPT2046 resistive controller (shares SPI1)
+- **RTC**: DS1307 over software I²C
+- **Temperature**: LM75 over software I²C
+- **Light sensor**: analog input to **ADC1 IN10 (PC0)**
+- **Servo**: e.g. MG90S on PB8 (TIM4 CH3, 50 Hz PWM)
+- **Relay**: module driven from PB12 (active-high input)
+- **Debug LED**: PB13
+- **Power**: common 5 V supply with **shared GND** between MCU, sensors, relay and servo
 
-Temperature from LM75
+---
 
-Light percentage from ADC
+## Pin Map (core signals)
 
-Relay test button:
+| Function                  | MCU pin(s)       | Notes                                       |
+|--------------------------|------------------|---------------------------------------------|
+| TFT SCK / MISO / MOSI    | PA5 / PA6 / PA7  | SPI1 bus (shared with XPT2046)             |
+| TFT / Touch CS           | see `gpio.c`     | Chip-select pins configured in CubeMX      |
+| I²C SCL (software)       | PB6              | Bit-banged I²C clock                        |
+| I²C SDA (software)       | PB7              | Bit-banged I²C data                         |
+| Light sensor             | PC0              | ADC1 IN10, mapped to 0–100% light          |
+| Servo PWM                | PB8              | TIM4 CH3, 50 Hz, 600–2400 µs pulse width    |
+| Relay control            | PB12             | Push-pull output → relay input (active-high)|
+| Debug LED                | PB13             | Toggles during I²C / periodic refresh      |
+| Power / GND              | VCC, GND         | All modules share the same ground          |
 
-Toggles a relay output
+For exact CS/RESET pins of display and touch, see `Core/Src/gpio.c`  
+and the CubeMX `.ioc` file.
 
-When the relay is ON, the servo starts sweeping between 0 and 180 degrees
+---
 
-Setup
+## Timing & PWM
 
-Simple configuration screen with three rows:
+- **System clock**: HSI → PLL → **168 MHz SYSCLK**
+- **TIM4 configuration**:
+  - Prescaler = 83 → **1 µs tick**
+  - Period = 19999 → **20 ms frame (50 Hz PWM)**
+- **Servo mapping (PB8 / TIM4 CH3)**:
+  - 0°  → 600 µs
+  - 180° → 2400 µs  
+  The code maps **0–180° → 600–2400 µs** and writes the value directly  
+  into the TIM4 CH3 compare register via `SERVO_SetAngle()`.
 
-Hour
+---
 
-Minute
+## Build & Flash
 
-Temperature threshold
+- **Toolchain**: STM32CubeIDE
 
-Each row has a numeric value box and a “+” button
+### Steps
 
-Long press on a button repeats the increment
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/jenia91/stm32-ili9341-touch-PWM-SPI-ADC-I2C-Project.git
+Open the project in STM32CubeIDE using
+Ivgeni_Goriatchev_STM32_Project.ioc.
 
-Project
-
-Periodic refresh once per second
-
-Shows:
-
-Current time (RTC or user-set software time)
-
-Temperature and threshold
-
-Light percentage
-
-Placeholder line for future irrigation logic
-
-Peripherals and Interfaces
-Communication Interfaces
-Interface	Purpose	Implementation
-SPI1	TFT display + touch controller	HAL SPI (blocking)
-I2C (SW)	DS1307 RTC, LM75 temperature	Bit-banged on PB6/PB7
-ADC1	Light sensor	Single channel on PC0
-PWM	Servo control	TIM4 CH3 on PB8
-GPIO	Relay and debug LED	PB12, PB13 outputs
-Hardware Summary
-
-STM32F4 development board (HSI to PLL at 168 MHz)
-
-ILI9341 320x240 TFT display over SPI1
-
-XPT2046 resistive touch controller (shares SPI1)
-
-DS1307 real-time clock (I2C)
-
-LM75 temperature sensor (I2C)
-
-Light sensor connected to ADC1 on PC0 (IN10)
-
-Servo motor (for example MG90S) on PB8 driven by 50 Hz PWM
-
-Relay module on PB12
-
-Common power supply and shared GND between MCU, sensors, servo and relay
-
-Pin Map (core signals)
-Function	MCU pin	Notes
-TFT SCK / MISO / MOSI	PA5 / PA6 / PA7	SPI1 bus shared with XPT2046
-TFT / Touch CS	See gpio.c	Chip-select pins configured in CubeMX / gpio.c
-I2C SCL (SW)	PB6	Software I2C bit-bang
-I2C SDA (SW)	PB7	Software I2C bit-bang
-Light sensor	PC0	ADC1 IN10, scaled to 0–100%
-Servo PWM	PB8	TIM4 CH3, 50 Hz, 600–2400 µs pulse width
-Relay control	PB12	Push-pull output to relay module input (active high)
-Debug LED	PB13	Toggles during I2C / periodic refresh
-Power / GND	VCC, GND	All modules share the same ground
-
-For exact chip-select and reset pins of the display and touch controller, see Core/Src/gpio.c and the CubeMX .ioc file.
-
-Timing and PWM
-
-System clock is configured from HSI through PLL to 168 MHz.
-
-TIM4 is configured with:
-
-1 µs tick (Prescaler = 83)
-
-Period = 19999 for a 20 ms frame (50 Hz PWM)
-
-Servo mapping:
-
-0 degrees → 600 µs
-
-180 degrees → 2400 µs
-The code linearly maps 0–180 degrees to this pulse width range and writes it into TIM4 CH3 compare register.
-
-Build and Flash
-
-Toolchain: STM32CubeIDE
-
-Steps:
-
-Clone this repository.
-
-Open the project in STM32CubeIDE using the existing .ioc file.
+Let CubeIDE load the existing configuration and code.
 
 Build the project in Debug or Release configuration.
 
-Flash the firmware to the board using ST-LINK.
+Flash the firmware to the STM32F4 board using ST-LINK.
 
-Open a serial terminal or use the on-board debug LED to observe activity.
+Power the board with the TFT, touch, sensors, relay and servo connected.
 
-No RTOS is used, the main loop is fully event-driven with HAL and small delays to limit CPU usage.
+Use the GUI:
+
+Check screen to test RTC/LM75/light/relay
+
+Setup screen to adjust time and temperature threshold
+
+Project screen to watch the periodic updates
+
+No RTOS is used – the main loop is event-driven with small delays
+to limit CPU usage.
+
+Quick Links
+Main GUI / logic → Core/Src/main.c
+
+DS1307 RTC driver (SW I²C) → Core/Src/rtc_ds1307.c
+
+LM75 temperature driver → Core/Src/sensors_lm75.c
+
+Software I²C bit-bang → Core/Src/i2c_sw.c
+
+GPIO, SPI, ADC, TIM init → Core/Src/gpio.c, Core/Src/spi.c, Core/Src/adc.c, Core/Src/tim.c
+
+Public headers → Core/Inc/
+
+CubeMX configuration → Ivgeni_Goriatchev_STM32_Project.ioc
 
 Repository Structure
+Repo map
+text
+Copy code
 Core/
-  Inc/
-    main.h
-    rtc_ds1307.h
-    sensors_lm75.h
-    i2c_sw.h
-    ...
-  Src/
-    main.c           // GUI, touch handling, sensors, relay and servo logic
-    rtc_ds1307.c     // DS1307 driver over software I2C
-    sensors_lm75.c   // LM75 temperature driver
-    i2c_sw.c         // Bit-banged I2C implementation
-    spi.c, adc.c, tim.c, gpio.c
+ ├─ Inc/
+ │   ├─ main.h             # Global defines, prototypes
+ │   ├─ rtc_ds1307.h       # DS1307 RTC interface (SW I2C)
+ │   ├─ sensors_lm75.h     # LM75 temperature interface
+ │   ├─ i2c_sw.h           # Software I2C on PB6/PB7
+ │   └─ ...                # HAL config / IRQ headers
+ │
+ └─ Src/
+     ├─ main.c             # GUI, touch handling, sensors, relay + servo logic
+     ├─ rtc_ds1307.c       # DS1307 driver over software I2C
+     ├─ sensors_lm75.c     # LM75 temperature driver
+     ├─ i2c_sw.c           # Bit-banged I2C implementation
+     ├─ spi.c, adc.c       # SPI1, ADC1 init
+     ├─ tim.c, gpio.c      # TIM4 PWM, GPIO and pin mapping
+     └─ ...                # HAL MSP / IRQ sources
+
 Drivers/
-  STM32F4xx_HAL_Driver/
-  CMSIS/
-Middlewares/
-  ...
-stm32_project.ioc    // STM32CubeMX configuration
+ ├─ STM32F4xx_HAL_Driver/  # HAL drivers
+ ├─ CMSIS/                 # CMSIS device + core
+ └─ Middlewares/           # (if used by CubeMX)
+
+Ivgeni_Goriatchev_STM32_Project.ioc  # STM32CubeMX configuration
 .gitignore
+LICENSE
 README.md
